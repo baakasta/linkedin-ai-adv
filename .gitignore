@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# Database files
+*.db
+
+# Environment variables
+.env
+
+# Editor
+.vscode/
+.idea/
+
+# uv
+.python-version
