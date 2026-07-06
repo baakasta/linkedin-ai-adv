@@ -11,9 +11,9 @@ from backend.models.subscription import Subscription, PlanTier, SubscriptionStat
 
 from backend.db.db import Base, engine, get_db
 
-from backend.schemas.userschema import UserCreate, UserResponse,AccountResponse
-from backend.schemas.executiveschema import ExecutiveCreate, ExecutiveResponse
-from backend.schemas.companyschema import CompanyCreate, CompanyResponse
+from backend.schemas.userschema import UserCreate, UserResponse,AccountResponse, UserUpdate,AccountUpdate
+from backend.schemas.executiveschema import ExecutiveCreate, ExecutiveResponse,ExecutiveUpdate
+from backend.schemas.companyschema import CompanyCreate, CompanyResponse,CompanyUpdate
 from backend.schemas.subscriptionschema import SubscriptionResponse
 
 
@@ -43,57 +43,6 @@ def get_user(user_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
         return user
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-@app.get("/api/accounts/{account_id}", response_model=AccountResponse)
-def get_account(account_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
-    result = db.execute(
-        select(Account).where(Account.id == account_id),
-    )
-    account = result.scalars().first()
-    if account:
-        return account
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-
-@app.get("/api/companies", response_model=list[CompanyResponse])
-def get_all_companies(db: Annotated[Session, Depends(get_db)]):
-    result = db.execute(select(Company))
-    return result.scalars().all()
-
-@app.get("/api/companies/{company_id}", response_model=CompanyResponse)
-def get_company(company_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
-    result = db.execute(
-        select(Company).where(Company.id == company_id)
-    )
-    company = result.scalars().first()
-    if not company:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    return company
-
-@app.get("/api/executives", response_model=list[ExecutiveResponse])
-def get_all_executives(db: Annotated[Session, Depends(get_db)]):
-    result = db.execute(select(Executive))
-    return result.scalars().all()
-
-
-@app.get("/api/executives/{executive_id}", response_model=ExecutiveResponse)
-def get_executive(executive_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
-    result = db.execute(
-        select(Executive).where(Executive.id == executive_id)
-    )
-    executive = result.scalars().first()
-    if not executive:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Executive not found")
-    return executive
-
-@app.get("/api/accounts/{account_id}/subscription", response_model=SubscriptionResponse)
-def get_subscription(account_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
-    result = db.execute(
-        select(Subscription).where(Subscription.account_id == account_id)
-    )
-    subscription = result.scalars().first()
-    if not subscription:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
-    return subscription
-
 @app.post(
     "/api/users/create",
     response_model=UserResponse,
@@ -108,7 +57,6 @@ def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
         )
-
 
     new_account = Account(name=user.account_name)
     db.add(new_account)
@@ -131,6 +79,109 @@ def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]):
     db.refresh(new_user)
     return new_user
 
+@app.patch("/api/users/{user_id}", response_model=UserResponse)
+def partial_update_user(
+    user_id: uuid.UUID,
+    user_update: UserUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
+    result = db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if user_update.email is not None and user_update.email != user.email:
+        result = db.execute(
+            select(User).where(User.email == user_update.email),
+        )
+        existing_email = result.scalars().first()
+        if existing_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
+
+    update_data = user_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(user, field, value)
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+@app.delete("/api/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    db.delete(user)
+    db.commit()
+
+
+@app.get("/api/accounts/{account_id}", response_model=AccountResponse)
+def get_account(account_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(
+        select(Account).where(Account.id == account_id),
+    )
+    account = result.scalars().first()
+    if account:
+        return account
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
+@app.get("/api/accounts/{account_id}/subscription", response_model=SubscriptionResponse)
+def get_subscription(account_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(
+        select(Subscription).where(Subscription.account_id == account_id)
+    )
+    subscription = result.scalars().first()
+    if not subscription:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+    return subscription
+
+@app.patch("/api/accounts/{account_id}", response_model=AccountResponse)
+def partial_update_account(
+    account_id: uuid.UUID,
+    account_update: AccountUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
+    result = db.execute(select(Account).where(Account.id == account_id))
+    account = result.scalars().first()
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found",
+        )
+
+    if account_update.name is not None:
+        account.name = account_update.name
+
+    db.commit()
+    db.refresh(account)
+    return account
+
+@app.get("/api/companies", response_model=list[CompanyResponse])
+def get_all_companies(db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(select(Company))
+    return result.scalars().all()
+
+@app.get("/api/companies/{company_id}", response_model=CompanyResponse)
+def get_company(company_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(
+        select(Company).where(Company.id == company_id)
+    )
+    company = result.scalars().first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    return company
+
 @app.post("/api/companies/create", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 def create_company(company: CompanyCreate, account_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
     existing = db.execute(
@@ -148,6 +199,56 @@ def create_company(company: CompanyCreate, account_id: uuid.UUID, db: Annotated[
     db.commit()
     db.refresh(new_company)
     return new_company
+
+@app.patch("/api/companies/{company_id}", response_model=CompanyResponse)
+def partial_update_company(
+    company_id: uuid.UUID,
+    company_update: CompanyUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
+    result = db.execute(select(Company).where(Company.id == company_id))
+    company = result.scalars().first()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )
+
+    update_data = company_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(company, field, value)
+
+    db.commit()
+    db.refresh(company)
+    return company
+
+@app.delete("/api/companies/{company_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_company(company_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(select(Company).where(Company.id == company_id))
+    company = result.scalars().first()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="company not found",
+        )
+
+    db.delete(company)
+    db.commit()
+
+@app.get("/api/executives", response_model=list[ExecutiveResponse])
+def get_all_executives(db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(select(Executive))
+    return result.scalars().all()
+
+@app.get("/api/executives/{executive_id}", response_model=ExecutiveResponse)
+def get_executive(executive_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(
+        select(Executive).where(Executive.id == executive_id)
+    )
+    executive = result.scalars().first()
+    if not executive:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Executive not found")
+    return executive
 
 @app.post("/api/executives/create", response_model=ExecutiveResponse, status_code=status.HTTP_201_CREATED)
 def create_executive(executive: ExecutiveCreate, db: Annotated[Session, Depends(get_db)]):
@@ -169,3 +270,37 @@ def create_executive(executive: ExecutiveCreate, db: Annotated[Session, Depends(
     db.refresh(new_executive)
     return new_executive
 
+@app.patch("/api/executives/{executive_id}", response_model=ExecutiveResponse)
+def partial_update_executive(
+    executive_id: uuid.UUID,
+    executive_update: ExecutiveUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
+    result = db.execute(select(Executive).where(Executive.id == executive_id))
+    executive = result.scalars().first()
+    if not executive:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Executive not found",
+        )
+
+    update_data = executive_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(executive, field, value)
+
+    db.commit()
+    db.refresh(executive)
+    return executive
+
+@app.delete("/api/executives/{executive_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_executive(executive_id: int, db: Annotated[Session, Depends(get_db)]):
+    result = db.execute(select(Executive).where(Executive.id == executive_id))
+    executive = result.scalars().first()
+    if not executive:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="executive not found",
+        )
+
+    db.delete(executive)
+    db.commit()
