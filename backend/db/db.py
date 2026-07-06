@@ -1,16 +1,19 @@
 from datetime import datetime
 import uuid
-from sqlalchemy import UUID,DateTime, func,create_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import UUID,DateTime, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./linkedin_ai_advisor.db"
+SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///./linkedin_ai_advisor.db"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
+engine = create_async_engine(SQLALCHEMY_DATABASE_URL)
+    
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
 )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
     pass
@@ -29,6 +32,6 @@ class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-def get_db():
-    with SessionLocal() as db:
-        yield db
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session

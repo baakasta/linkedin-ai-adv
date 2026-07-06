@@ -3,9 +3,11 @@ name = "linkedin-ai-adv"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
+    "aiosqlite>=0.22.1",
     "fastapi>=0.139.0",
+    "greenlet>=3.5.3",
     "pydantic[email]>=2.13.4",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.50.0",

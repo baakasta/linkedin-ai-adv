@@ -9,7 +9,7 @@ class AccountResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class AccountUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=50)
+    name: str | None = Field(default=None, min_length=1, max_length=50)
 
 
 
