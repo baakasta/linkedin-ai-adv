@@ -31,7 +31,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
 
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    #hashed_password: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), default=UserRole.OWNER)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

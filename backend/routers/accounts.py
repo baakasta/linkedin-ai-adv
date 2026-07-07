@@ -1,57 +1,71 @@
 from typing import Annotated
-import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from backend.db.db import get_db
-from backend.models.user import Account
-from backend.schemas.userschema import AccountResponse , AccountUpdate
-from backend.schemas.subscriptionschema import SubscriptionResponse
+from backend.models.user import Account, User
 from backend.models.subscription import Subscription
+from backend.schemas.userschema import AccountResponse, AccountUpdate
+from backend.schemas.subscriptionschema import SubscriptionResponse
+from backend.auth import get_current_user
 
 router = APIRouter()
 
+# admin only — no auth for now, will restrict later
 @router.get("")
 async def get_all_accounts(db: Annotated[AsyncSession, Depends(get_db)]):
-    result = await db.execute(select(Account).options(selectinload(Account.users ) ).options(selectinload(Account.companies)).options(selectinload(Account.subscription)))
-    accounts = result.scalars().all()
-    return accounts
-
-
-@router.get("/{account_id}", response_model=AccountResponse)
-async def get_account(account_id: uuid.UUID, db: Annotated[AsyncSession, Depends(get_db)]):
     result = await db.execute(
-        select(Account).options(selectinload(Account.users), selectinload(Account.companies), selectinload(Account.subscription)).where(Account.id == account_id),
+        select(Account)
+        .options(selectinload(Account.users))
+        .options(selectinload(Account.companies))
+        .options(selectinload(Account.subscription))
+    )
+    return result.scalars().all()
+
+# get MY account — from token
+@router.get("/me", response_model=AccountResponse)
+async def get_my_account(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(
+        select(Account)
+        .options(selectinload(Account.users))
+        .options(selectinload(Account.companies))
+        .options(selectinload(Account.subscription))
+        .where(Account.id == current_user.account_id)
     )
     account = result.scalars().first()
-    if account:
-        return account
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    return account
 
-@router.get("/{account_id}/subscription", response_model=SubscriptionResponse)
-async def get_subscription(account_id: uuid.UUID, db: Annotated[AsyncSession, Depends(get_db)]):
+# get MY subscription — from token
+@router.get("/me/subscription", response_model=SubscriptionResponse)
+async def get_my_subscription(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     result = await db.execute(
-        select(Subscription).where(Subscription.account_id == account_id)
+        select(Subscription).where(Subscription.account_id == current_user.account_id)
     )
     subscription = result.scalars().first()
     if not subscription:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
     return subscription
 
-@router.patch("/{account_id}", response_model=AccountResponse)
-async def partial_update_account(
-    account_id: uuid.UUID,
+# update MY account — from token
+@router.patch("/me", response_model=AccountResponse)
+async def update_my_account(
     account_update: AccountUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    result = await db.execute(select(Account).where(Account.id == account_id))
+    result = await db.execute(select(Account).where(Account.id == current_user.account_id))
     account = result.scalars().first()
     if not account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
     if account_update.name is not None:
         account.name = account_update.name
@@ -62,6 +76,6 @@ async def partial_update_account(
         .options(selectinload(Account.users))
         .options(selectinload(Account.companies))
         .options(selectinload(Account.subscription))
-        .where(Account.id == account_id)
+        .where(Account.id == current_user.account_id)
     )
     return result.scalars().first()

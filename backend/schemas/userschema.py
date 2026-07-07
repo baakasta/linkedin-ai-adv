@@ -20,15 +20,24 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     account_name: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=8)
 
 
-class UserResponse(UserBase):
+class UserPublic(BaseModel):
     id: uuid.UUID
+    full_name: str = Field(min_length=1, max_length=50)
     account_id: uuid.UUID
     model_config = ConfigDict(from_attributes=True)
+
+class UserPrivate(UserPublic):
+    email: EmailStr
 
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=50)
     email: EmailStr| None = Field(default=None, max_length=120)
     role: UserRole | None = None
     is_active: bool | None = None
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str

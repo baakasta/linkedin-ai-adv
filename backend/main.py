@@ -20,3 +20,13 @@ app.include_router(companies.router, prefix="/api/companies", tags=["companies"]
 app.include_router(executives.router, prefix="/api/executives", tags=["executives"])
 app.include_router(accounts.router, prefix="/api/accounts", tags=["accounts"])
 
+@app.get("/login", include_in_schema=False)
+async def login_page():
+    pass #untill front is ready 
+
+
+@app.get("/register", include_in_schema=False)
+async def register_page():
+    pass #same baba w5ay
+    
+
