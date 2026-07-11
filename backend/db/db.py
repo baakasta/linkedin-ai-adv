@@ -3,10 +3,10 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy import UUID,DateTime, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from backend.config import settings
 
-SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///./linkedin_ai_advisor.db"
 
-engine = create_async_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_async_engine(settings.database_url)
     
 AsyncSessionLocal = async_sessionmaker(
     engine,

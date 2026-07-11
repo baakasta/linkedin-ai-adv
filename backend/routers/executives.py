@@ -7,25 +7,37 @@ from sqlalchemy.orm import selectinload
 from backend.db.db import get_db
 from backend.models.executive import Executive
 from backend.models.company import Company
-from backend.models.user import User
+from backend.models.user import User, UserRole
 from backend.schemas.executiveschema import ExecutiveCreate, ExecutiveResponse, ExecutiveUpdate
-from backend.auth import get_current_user
+from backend.auth import get_current_user, require_role
 
 router = APIRouter()
 
-@router.get("", response_model=list[ExecutiveResponse])
-async def get_all_executives(db: Annotated[AsyncSession, Depends(get_db)]):
+@router.get("", response_model=list[ExecutiveResponse],)
+async def get_all_executives(db: Annotated[AsyncSession, Depends(get_db)],
+                            _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+):
     result = await db.execute(select(Executive).options(selectinload(Executive.company)))
     return result.scalars().all()
 
 @router.get("/{executive_id}", response_model=ExecutiveResponse)
-async def get_executive(executive_id: uuid.UUID, db: Annotated[AsyncSession, Depends(get_db)]):
+async def get_executive(
+    executive_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
     result = await db.execute(
-        select(Executive).options(selectinload(Executive.company)).where(Executive.id == executive_id)
+        select(Executive)
+        .options(selectinload(Executive.company))
+        .where(Executive.id == executive_id)
     )
     executive = result.scalars().first()
     if not executive:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Executive not found")
+
+    if executive.company.account_id != current_user.account_id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your executive")
+
     return executive
 
 @router.post("/create", response_model=ExecutiveResponse, status_code=status.HTTP_201_CREATED)

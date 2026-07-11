@@ -4,17 +4,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from backend.db.db import get_db
-from backend.models.user import Account, User
+from backend.models.user import Account, User, UserRole
 from backend.models.subscription import Subscription
 from backend.schemas.userschema import AccountResponse, AccountUpdate
 from backend.schemas.subscriptionschema import SubscriptionResponse
-from backend.auth import get_current_user
+from backend.auth import get_current_user, require_role
 
 router = APIRouter()
 
 # admin only — no auth for now, will restrict later
 @router.get("")
-async def get_all_accounts(db: Annotated[AsyncSession, Depends(get_db)]):
+async def get_all_accounts(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+):
     result = await db.execute(
         select(Account)
         .options(selectinload(Account.users))

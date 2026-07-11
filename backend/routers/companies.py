@@ -5,20 +5,38 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from backend.models.company import Company
-from backend.models.user import User
+from backend.models.user import User, UserRole
 from backend.db.db import get_db
 from backend.schemas.companyschema import CompanyCreate, CompanyResponse, CompanyUpdate
-from backend.auth import get_current_user
+from backend.auth import get_current_user ,require_role
 
 router = APIRouter()
 
 @router.get("", response_model=list[CompanyResponse])
-async def get_all_companies(db: Annotated[AsyncSession, Depends(get_db)]):
+async def get_all_companies(db: Annotated[AsyncSession, Depends(get_db)],
+                            _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+):
     result = await db.execute(select(Company))
     return result.scalars().all()
 
+@router.get("/me", response_model=list[CompanyResponse])
+async def get_my_companies(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(
+        select(Company)
+        .options(selectinload(Company.executives))
+        .where(Company.account_id == current_user.account_id)
+    )
+    return result.scalars().all()
+
 @router.get("/{company_id}", response_model=CompanyResponse)
-async def get_company(company_id: uuid.UUID, db: Annotated[AsyncSession, Depends(get_db)]):
+async def get_company(
+    company_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
     result = await db.execute(
         select(Company)
         .options(selectinload(Company.account))
@@ -28,6 +46,10 @@ async def get_company(company_id: uuid.UUID, db: Annotated[AsyncSession, Depends
     company = result.scalars().first()
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    if company.account_id != current_user.account_id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
+
     return company
 
 @router.post("/create", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
