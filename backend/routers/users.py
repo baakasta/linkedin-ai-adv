@@ -16,7 +16,8 @@ from backend.schemas.userschema import (
     UserPublic,
     ChangePasswordRequest,
     ForgotPasswordRequest,
-    ResetPasswordRequest,)
+    ResetPasswordRequest,
+    AdminUserUpdate,)
 from backend.models.subscription import Subscription, PlanTier, SubscriptionStatus
 from backend.auth import (
     create_access_token,
@@ -34,7 +35,7 @@ from backend.config import settings
 from sqlalchemy import delete as sql_delete
 router = APIRouter()
 
-@router.get("")
+@router.get("", response_model=list[UserPublic])
 async def get_all_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
@@ -106,7 +107,12 @@ async def login_for_access_token(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is deactivated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     # Create access token with user id as subject
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(
@@ -321,3 +327,23 @@ async def change_password(
 
     await db.commit()
     return {"message": "Password changed successfully"}
+
+@router.patch("/{user_id}/admin", response_model=UserPrivate)
+async def admin_update_user(
+    user_id: uuid.UUID,
+    user_update: AdminUserUpdate,
+    current_user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    update_data = user_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(user, field, value)
+
+    await db.commit()
+    await db.refresh(user)
+    return user

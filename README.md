@@ -164,4 +164,14 @@ Interactive API documentation: `http://localhost:8000/docs`
 3. In `/docs`, click **Authorize** and paste the token in the `Value` field
 4. All protected endpoints will now work automatically
 
+## Creating the first admin account
+
+After running migrations, create your local admin account:
+
+1. Open `scripts/create_admin.py`
+2. Fill in your name, email and password
+3. Run:
+   python scripts/create_admin.py
+4. Login via `POST /api/users/token` with those credentials
+5. Change your password via `PATCH /api/users/me/password`
 

@@ -1,4 +1,5 @@
 from typing import Annotated
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +8,7 @@ from backend.db.db import get_db
 from backend.models.user import Account, User, UserRole
 from backend.models.subscription import Subscription
 from backend.schemas.userschema import AccountResponse, AccountUpdate
-from backend.schemas.subscriptionschema import SubscriptionResponse
+from backend.schemas.subscriptionschema import SubscriptionResponse,SubscriptionUpdate
 from backend.auth import get_current_user, require_role
 
 router = APIRouter()
@@ -82,3 +83,25 @@ async def update_my_account(
         .where(Account.id == current_user.account_id)
     )
     return result.scalars().first()
+
+@router.patch("/{account_id}/subscription", response_model=SubscriptionResponse)
+async def update_subscription(
+    account_id: uuid.UUID,
+    subscription_update: SubscriptionUpdate,
+    current_user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(
+        select(Subscription).where(Subscription.account_id == account_id)
+    )
+    subscription = result.scalars().first()
+    if not subscription:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription not found")
+
+    update_data = subscription_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(subscription, field, value)
+
+    await db.commit()
+    await db.refresh(subscription)
+    return subscription

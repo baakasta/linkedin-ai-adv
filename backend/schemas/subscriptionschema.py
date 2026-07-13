@@ -11,3 +11,7 @@ class SubscriptionResponse(BaseModel):
     status: SubscriptionStatus
     current_period_end: datetime | None
     model_config = ConfigDict(from_attributes=True)
+
+class SubscriptionUpdate(BaseModel):
+    plan_tier: PlanTier | None = None
+    status: SubscriptionStatus | None = None
