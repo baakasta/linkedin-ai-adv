@@ -18,4 +18,4 @@ class Executive(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     job_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     linkedin_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
-    company: Mapped["Company"] = relationship(back_populates="executives")
+    company: Mapped["Company"] = relationship(back_populates="executives") 

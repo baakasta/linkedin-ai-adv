@@ -22,4 +22,4 @@ class Settings(BaseSettings):
 
     frontend_url: str = "http://localhost:8000"
 
-settings = Settings() # Loaded from .env file
+settings = Settings() 

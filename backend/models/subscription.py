@@ -26,7 +26,7 @@ class Subscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     account_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("accounts.id", ondelete="CASCADE"),
-        unique=True,   # one subscription per account
+        unique=True,   
         nullable=False,
         index=True,
     )
