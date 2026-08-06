@@ -21,5 +21,6 @@ class Settings(BaseSettings):
     mail_use_tls: bool = True
 
     frontend_url: str = "http://localhost:8000"
+    ai_service_url: str = "http://localhost:8080"
 
 settings = Settings() 

@@ -1,0 +1,377 @@
+from typing import Annotated
+import uuid
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from backend.db.db import get_db
+from backend.models.user import User
+from backend.models.company import Company
+from backend.models.audit import Audit
+from backend.models.recommendation import Recommendation, RecommendationPriority
+from backend.models.optimization import Optimization
+from backend.models.generation import Generation
+from backend.auth import get_current_user
+from backend.config import settings
+from backend.schemas.auditschema import AuditCreate, AuditResponse, AuditListResponse
+from backend.schemas.recommendationschema import RecommendationResponse
+from backend.schemas.optimizationschema import OptimizationCreate, OptimizationResponse
+from backend.schemas.generationschema import GenerationCreate, GenerationResponse
+
+router = APIRouter()
+
+_PRIORITY_MAP = {
+    "CRITIQUE": RecommendationPriority.CRITIQUE,
+    "IMPORTANTE": RecommendationPriority.IMPORTANTE,
+    "IMPORTANT": RecommendationPriority.IMPORTANTE,
+    "OPTIMISATION": RecommendationPriority.OPTIMISATION,
+    "OPTIMIZATION": RecommendationPriority.OPTIMISATION,
+    "OPTIMISER": RecommendationPriority.OPTIMISATION,
+}
+
+
+def _parse_priority(value: str) -> RecommendationPriority:
+    key = str(value or "").strip().upper()
+    return _PRIORITY_MAP.get(key, RecommendationPriority.OPTIMISATION)
+
+
+def _evaluations_by_critere(analyse_ia: dict) -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for evaluation in analyse_ia.get("evaluations", []):
+        code = evaluation.get("critere") or evaluation.get("critere_code")
+        if code:
+            index[str(code)] = evaluation
+    return index
+
+
+def _niveau_for_critere(analyse_ia: dict, critere_code: str, default: int = 1) -> int:
+    evaluation = _evaluations_by_critere(analyse_ia).get(critere_code)
+    if not evaluation:
+        return default
+    try:
+        return int(evaluation.get("niveau", default))
+    except (TypeError, ValueError):
+        return default
+
+
+# --- Audit ---
+
+@router.post("/audits", response_model=AuditResponse, status_code=status.HTTP_201_CREATED)
+async def create_audit(
+    payload: AuditCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    # verify company belongs to current user
+    company = (await db.execute(
+        select(Company).where(Company.id == payload.company_id)
+    )).scalars().first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
+
+    # call AI module
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.ai_service_url}/api/audits",
+                json=payload.linkedin_data,
+                timeout=60.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI service error: {str(exc)}",
+            )
+
+    ai_result = response.json()
+    score = ai_result["score"]
+    analyse = ai_result["analyse_ia"]
+
+    # store audit
+    audit = Audit(
+        company_id=payload.company_id,
+        score_global=score["score_global"],
+        score_entreprise=score["score_entreprise"],
+        score_dirigeant=score.get("score_dirigeant"),
+        dirigeant_present=score.get("dirigeant_present", False),
+        score_detail=score,
+        analyse_ia=analyse,
+        linkedin_data=payload.linkedin_data,
+    )
+    db.add(audit)
+    await db.flush()
+
+    # store recommendations
+    eval_index = _evaluations_by_critere(analyse)
+    eval_list = analyse.get("evaluations", [])
+    reco_list = analyse.get("recommandations", [])
+
+    def match_evaluation(reco: dict, position: int) -> dict | None:
+        code = str(reco.get("critere_code") or reco.get("critere") or "").strip()
+        categorie = str(reco.get("categorie") or "").strip()
+        if code:
+            return eval_index.get(code)
+        if categorie:
+            for evaluation in eval_list:
+                if str(evaluation.get("categorie", "")).strip().lower() == categorie.lower():
+                    return evaluation
+        if len(eval_list) == len(reco_list) and position < len(eval_list):
+            # fallback: assume same ordering between evaluations and recommendations
+            return eval_list[position]
+        return None
+
+    for position, reco in enumerate(reco_list):
+        critere_code = str(reco.get("critere_code") or reco.get("critere") or "").strip()
+        categorie = str(reco.get("categorie") or "").strip()
+
+        matched_eval = match_evaluation(reco, position)
+        if matched_eval:
+            critere_code = critere_code or str(matched_eval.get("critere_code", "")).strip()
+            categorie = categorie or str(matched_eval.get("categorie", "")).strip()
+
+        recommendation = Recommendation(
+            audit_id=audit.id,
+            critere_code=critere_code,
+            categorie=categorie,
+            priorite=_parse_priority(reco.get("priorite")),
+            action=str(reco.get("action", "")),
+            raison=str(reco.get("raison", "")),
+        )
+        db.add(recommendation)
+
+    await db.commit()
+    await db.refresh(audit)
+    return audit
+
+
+@router.get("/audits/company/{company_id}", response_model=list[AuditListResponse])
+async def get_company_audits(
+    company_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    company = (await db.execute(
+        select(Company).where(Company.id == company_id)
+    )).scalars().first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
+
+    result = await db.execute(
+        select(Audit)
+        .where(Audit.company_id == company_id)
+        .order_by(Audit.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.get("/audits/{audit_id}", response_model=AuditResponse)
+async def get_audit(
+    audit_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(
+        select(Audit)
+        .options(selectinload(Audit.company))
+        .where(Audit.id == audit_id)
+    )
+    audit = result.scalars().first()
+    if not audit:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit not found")
+    if audit.company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your audit")
+    return audit
+
+
+@router.get("/audits/{audit_id}/recommendations", response_model=list[RecommendationResponse])
+async def get_audit_recommendations(
+    audit_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    audit = (await db.execute(
+        select(Audit).options(selectinload(Audit.company)).where(Audit.id == audit_id)
+    )).scalars().first()
+    if not audit:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit not found")
+    if audit.company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your audit")
+
+    result = await db.execute(
+        select(Recommendation).where(Recommendation.audit_id == audit_id)
+    )
+    return result.scalars().all()
+
+
+# --- Optimization ---
+
+@router.post("/optimizations", response_model=OptimizationResponse, status_code=status.HTTP_201_CREATED)
+async def create_optimization(
+    payload: OptimizationCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    # verify recommendation exists and belongs to user
+    recommendation = (await db.execute(
+        select(Recommendation)
+        .options(selectinload(Recommendation.audit).selectinload(Audit.company))
+        .where(Recommendation.id == payload.recommendation_id)
+    )).scalars().first()
+    if not recommendation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
+    if recommendation.audit.company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your recommendation")
+
+    # build AI request
+    niveau = _niveau_for_critere(recommendation.audit.analyse_ia, recommendation.critere_code)
+    ai_payload = {
+        "type_element": payload.type_element,
+        "contenu_actuel": payload.contenu_original or "",
+        "resultat_audit": {
+            "critere_code": recommendation.critere_code,
+            "niveau": niveau,
+            "justification_audit": recommendation.raison,
+            "recommandation_id": str(recommendation.id),
+        },
+        "contexte_entreprise": payload.contexte_entreprise,
+    }
+
+    # call AI module
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.ai_service_url}/api/optimisations",
+                json=ai_payload,
+                timeout=60.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI service error: {str(exc)}",
+            )
+
+    ai_result = response.json()
+
+    optimization = Optimization(
+        recommendation_id=payload.recommendation_id,
+        type_element=payload.type_element,
+        contenu_original=payload.contenu_original,
+        variantes={"variantes": ai_result.get("variantes", [])},
+        variante_recommandee=ai_result.get("variante_recommandee", {}),
+        marqueurs=ai_result.get("marqueurs", []),
+        faiblesses_corrigees=ai_result.get("faiblesses_corrigees", []),
+        ameliorations_apportees=ai_result.get("ameliorations_apportees", []),
+    )
+    db.add(optimization)
+    await db.commit()
+    await db.refresh(optimization)
+    return optimization
+
+
+@router.get("/optimizations/{optimization_id}", response_model=OptimizationResponse)
+async def get_optimization(
+    optimization_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    optimization = (await db.execute(
+        select(Optimization)
+        .options(
+            selectinload(Optimization.recommendation)
+            .selectinload(Recommendation.audit)
+            .selectinload(Audit.company)
+        )
+        .where(Optimization.id == optimization_id)
+    )).scalars().first()
+    if not optimization:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Optimization not found")
+    if optimization.recommendation.audit.company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your optimization")
+    return optimization
+
+
+# --- Generation ---
+
+@router.post("/generations", response_model=GenerationResponse, status_code=status.HTTP_201_CREATED)
+async def create_generation(
+    payload: GenerationCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    company = (await db.execute(
+        select(Company).where(Company.id == payload.company_id)
+    )).scalars().first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
+
+    # build AI request
+    ai_payload = {
+        "type_contenu": payload.type_contenu,
+        "brief": payload.brief,
+        "contexte_entreprise": payload.contexte_entreprise,
+    }
+
+    # call AI module
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.ai_service_url}/api/generations",
+                json=ai_payload,
+                timeout=60.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI service error: {str(exc)}",
+            )
+
+    ai_result = response.json()
+
+    generation = Generation(
+        company_id=payload.company_id,
+        type_contenu=payload.type_contenu,
+        brief=payload.brief,
+        titre_interne=ai_result.get("titre_interne"),
+        variantes={"variantes": ai_result.get("variantes", [])},
+        marqueurs_a_completer=ai_result.get(
+            "marqueurs_a_completer",
+            ai_result.get("marqueurs_acompleter", []),
+        ),
+    )
+    db.add(generation)
+    await db.commit()
+    await db.refresh(generation)
+    return generation
+
+
+@router.get("/generations/company/{company_id}", response_model=list[GenerationResponse])
+async def get_company_generations(
+    company_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    company = (await db.execute(
+        select(Company).where(Company.id == company_id)
+    )).scalars().first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
+
+    result = await db.execute(
+        select(Generation)
+        .where(Generation.company_id == company_id)
+        .order_by(Generation.created_at.desc())
+    )
+    return result.scalars().all()

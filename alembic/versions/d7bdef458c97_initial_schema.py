@@ -117,4 +117,6 @@ def downgrade() -> None:
     op.drop_table('companies')
     op.drop_index(op.f('ix_accounts_id'), table_name='accounts')
     op.drop_table('accounts')
-    
+    sa.Enum(name="plan_tier").drop(op.get_bind())
+    sa.Enum(name="subscription_status").drop(op.get_bind())
+    sa.Enum(name="user_role").drop(op.get_bind())

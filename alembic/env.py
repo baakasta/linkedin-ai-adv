@@ -18,6 +18,11 @@ from backend.models.executive import Executive  # noqa: F401
 from backend.config import settings
 from backend.db.db import Base
 
+from backend.models.audit import Audit
+from backend.models.recommendation import Recommendation
+from backend.models.optimization import Optimization
+from backend.models.generation import Generation
+
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
 

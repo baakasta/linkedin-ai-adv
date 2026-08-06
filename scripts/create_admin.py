@@ -5,6 +5,10 @@ from backend.models.user import User, Account, UserRole
 from backend.models.subscription import Subscription, PlanTier, SubscriptionStatus
 from backend.models.company import Company  
 from backend.models.executive import Executive  
+from backend.models.audit import Audit
+from backend.models.recommendation import Recommendation
+from backend.models.optimization import Optimization
+from backend.models.generation import Generation
 from backend.auth import hash_password
 from backend.config import settings
 
