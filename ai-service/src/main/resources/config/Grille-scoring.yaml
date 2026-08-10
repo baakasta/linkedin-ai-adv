@@ -1,0 +1,152 @@
+# ============================================================
+# GRILLE DE SCORING — LinkedIn AI Advisor
+# Fichier : src/main/resources/config/grille_scoring.yml
+#
+# MÉTHODE DE CALCUL (simple) :
+#   score = (somme des niveaux obtenus) / (somme des max) * 100
+#
+# La somme de tous les "note-max" = le score parfait = 100 %.
+# Un critère non_evaluable est retiré des DEUX sommes (obtenus + max),
+# donc l'absence de dirigeant ne pénalise pas : le score se recalcule
+# automatiquement sur les critères réellement présents.
+#
+# DEUX TYPES DE CRITÈRES :
+#   - existence  (max 1) : présent = 1, absent = 0. Jugé par les règles
+#                          (backend). Logo, bannière, photo, CTA, coordonnées.
+#   - qualite    (max 2 ou 3) : absent = 0, moyen = 1, bon = 2, excellent = 3.
+#                          Jugé par le LLM. Slogan, description, services...
+#
+# Les catégories servent à AFFICHER des sous-scores (dashboard),
+# mais le score global est une simple somme sur tous les critères.
+# ============================================================
+
+grille:
+  version: "1.0"
+  score-max: 100
+
+  categories:
+
+    # ---------------- PAGE ENTREPRISE ----------------
+    - code: page_entreprise
+      libelle: "Page entreprise"
+      criteres:
+
+        # -- existence (regles, max 1) --
+        - code: logo
+          libelle: "Logo"
+          note-max: 1
+          type: existence
+          methode: regles
+        - code: banniere
+          libelle: "Banniere"
+          note-max: 1
+          type: existence
+          methode: regles
+        - code: cta
+          libelle: "Bouton d'action (CTA)"
+          note-max: 1
+          type: existence
+          methode: regles
+        - code: coordonnees
+          libelle: "Coordonnees"
+          note-max: 1
+          type: existence
+          methode: regles
+
+        # -- qualite (LLM, max 2 ou 3) --
+        - code: slogan
+          libelle: "Slogan"
+          note-max: 2
+          type: qualite
+          methode: ia
+        - code: description_entreprise
+          libelle: "Description de l'entreprise"
+          note-max: 3
+          type: qualite
+          methode: ia
+        - code: services
+          libelle: "Services"
+          note-max: 2
+          type: qualite
+          methode: ia
+        - code: seo_mots_cles
+          libelle: "SEO et mots-cles"
+          note-max: 2
+          type: qualite
+          methode: ia
+        - code: publications_entreprise
+          libelle: "Qualite des publications"
+          note-max: 3
+          type: qualite
+          methode: ia
+
+    # ---------------- ACTIVITE (regles) ----------------
+    - code: activite_engagement
+      libelle: "Activite et engagement"
+      criteres:
+        - code: frequence_publication
+          libelle: "Frequence de publication"
+          note-max: 2
+          type: qualite
+          methode: regles
+        - code: engagement
+          libelle: "Taux d'engagement"
+          note-max: 2
+          type: qualite
+          methode: regles
+
+    # ---------------- PROFIL DIRIGEANT ----------------
+    # Toute cette categorie devient non_evaluable si le dirigeant
+    # est absent -> retiree du calcul, pas de penalite.
+    - code: dirigeant
+      libelle: "Profil du dirigeant"
+      criteres:
+
+        # -- existence (regles, max 1) --
+        - code: photo_dirigeant
+          libelle: "Photo du dirigeant"
+          note-max: 1
+          type: existence
+          methode: regles
+        - code: banniere_dirigeant
+          libelle: "Banniere du dirigeant"
+          note-max: 1
+          type: existence
+          methode: regles
+
+        # -- qualite (LLM, max 2 ou 3) --
+        - code: titre_dirigeant
+          libelle: "Titre du dirigeant"
+          note-max: 2
+          type: qualite
+          methode: ia
+        - code: resume_dirigeant
+          libelle: "Resume du dirigeant"
+          note-max: 3
+          type: qualite
+          methode: ia
+        - code: experience_dirigeant
+          libelle: "Experience"
+          note-max: 2
+          type: qualite
+          methode: ia
+        - code: competences_dirigeant
+          libelle: "Competences"
+          note-max: 2
+          type: qualite
+          methode: ia
+        - code: publications_dirigeant
+          libelle: "Publications du dirigeant"
+          note-max: 2
+          type: qualite
+          methode: ia
+
+    # ---------------- COHERENCE ----------------
+    - code: coherence
+      libelle: "Coherence dirigeant / entreprise"
+      criteres:
+        - code: coherence_dirigeant_entreprise
+          libelle: "Coherence avec l'entreprise"
+          note-max: 2
+          type: qualite
+          methode: ia

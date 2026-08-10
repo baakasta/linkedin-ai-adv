@@ -19,3 +19,7 @@ venv/
 
 # uv
 .python-version
+
+# Java (ai-service)
+target/
+*.class

@@ -1,0 +1,8 @@
+.git
+.gitignore
+.gitattributes
+.env
+target/
+.mvn/
+*.md
+HELP.md

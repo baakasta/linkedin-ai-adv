@@ -131,7 +131,9 @@ async def create_audit(
 
         matched_eval = match_evaluation(reco, position)
         if matched_eval:
-            critere_code = critere_code or str(matched_eval.get("critere_code", "")).strip()
+            critere_code = critere_code or str(
+                matched_eval.get("critere_code") or matched_eval.get("critere") or ""
+            ).strip()
             categorie = categorie or str(matched_eval.get("categorie", "")).strip()
 
         recommendation = Recommendation(

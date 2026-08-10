@@ -1,0 +1,16 @@
+ spring:
+  config:
+    import: "classpath:config/Grille-scoring.yaml"
+  application:
+    name: linkedin-advisor
+
+  jackson:
+    property-naming-strategy: SNAKE_CASE      # conversion snake_case <-> camelCase
+
+  ai:
+    mistralai:
+      api-key: ${MISTRAL_API_KEY}             # depuis variable d'environnement
+      chat:
+        options:
+          model: mistral-large-latest
+          #temperature: 0.0                   # défaut ; on surchargera par usage
