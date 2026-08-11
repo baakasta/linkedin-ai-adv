@@ -13,12 +13,15 @@ from backend.models.audit import Audit
 from backend.models.recommendation import Recommendation, RecommendationPriority
 from backend.models.optimization import Optimization
 from backend.models.generation import Generation
+from backend.models.benchmark import Benchmark
 from backend.auth import get_current_user
 from backend.config import settings
 from backend.schemas.auditschema import AuditCreate, AuditResponse, AuditListResponse
 from backend.schemas.recommendationschema import RecommendationResponse
 from backend.schemas.optimizationschema import OptimizationCreate, OptimizationResponse
 from backend.schemas.generationschema import GenerationCreate, GenerationResponse
+from backend.schemas.benchmarkschema import BenchmarkCreate, BenchmarkResponse
+from backend.services.benchmark import build_benchmark
 
 router = APIRouter()
 
@@ -375,5 +378,119 @@ async def get_company_generations(
         select(Generation)
         .where(Generation.company_id == company_id)
         .order_by(Generation.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+# --- Benchmark ---
+
+@router.post("/benchmarks", response_model=BenchmarkResponse, status_code=status.HTTP_201_CREATED)
+async def create_benchmark(
+    payload: BenchmarkCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    company = (await db.execute(
+        select(Company).where(Company.id == payload.company_id)
+    )).scalars().first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
+
+    target_audit = (await db.execute(
+        select(Audit)
+        .where(Audit.company_id == payload.company_id)
+        .order_by(Audit.created_at.desc())
+    )).scalars().first()
+    if not target_audit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Company has no audit yet — run an audit first",
+        )
+
+    competitor_analyses: list[dict] = []
+    competitor_ids: list[str] = []
+    seen: set[str] = set()
+    for audit_id in payload.audit_ids:
+        audit_key = str(audit_id)
+        if audit_key in seen:
+            continue
+        seen.add(audit_key)
+        audit = (await db.execute(
+            select(Audit)
+            .options(selectinload(Audit.company))
+            .where(Audit.id == audit_id)
+        )).scalars().first()
+        if not audit:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Audit {audit_id} not found",
+            )
+        if audit.company.account_id != current_user.account_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not your audit",
+            )
+        if audit.company_id == payload.company_id:
+            continue
+        competitor_analyses.append(audit.analyse_ia)
+        competitor_ids.append(audit_key)
+
+    if not competitor_analyses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide at least one competitor audit from a different company",
+        )
+
+    resultat = build_benchmark(target_audit.analyse_ia, competitor_analyses)
+
+    benchmark = Benchmark(
+        company_id=payload.company_id,
+        audit_ids=[str(audit_id) for audit_id in payload.audit_ids],
+        resultat=resultat,
+    )
+    db.add(benchmark)
+    await db.commit()
+    await db.refresh(benchmark)
+    return benchmark
+
+
+@router.get("/benchmarks/{benchmark_id}", response_model=BenchmarkResponse)
+async def get_benchmark(
+    benchmark_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    benchmark = (await db.execute(
+        select(Benchmark)
+        .options(selectinload(Benchmark.company))
+        .where(Benchmark.id == benchmark_id)
+    )).scalars().first()
+    if not benchmark:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Benchmark not found")
+    if benchmark.company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your benchmark")
+    return benchmark
+
+
+@router.get("/benchmarks/company/{company_id}", response_model=list[BenchmarkResponse])
+async def get_company_benchmarks(
+    company_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    company = (await db.execute(
+        select(Company).where(Company.id == company_id)
+    )).scalars().first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
+
+    result = await db.execute(
+        select(Benchmark)
+        .where(Benchmark.company_id == company_id)
+        .order_by(Benchmark.created_at.desc())
     )
     return result.scalars().all()

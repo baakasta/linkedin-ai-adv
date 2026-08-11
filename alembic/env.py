@@ -22,6 +22,7 @@ from backend.models.audit import Audit
 from backend.models.recommendation import Recommendation
 from backend.models.optimization import Optimization
 from backend.models.generation import Generation
+from backend.models.benchmark import Benchmark
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

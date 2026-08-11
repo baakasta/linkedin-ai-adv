@@ -5,6 +5,7 @@ from sqlalchemy import UUID
 from backend.db.db import Base, UUIDPrimaryKeyMixin, TimestampMixin
 from backend.models.generation import Generation
 from backend.models.audit import Audit
+from backend.models.benchmark import Benchmark
 
 
 class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -24,3 +25,4 @@ class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     audits: Mapped[list["Audit"]] = relationship(back_populates="company", cascade="all, delete-orphan")
     generations: Mapped[list["Generation"]] = relationship(back_populates="company", cascade="all, delete-orphan")
+    benchmarks: Mapped[list["Benchmark"]] = relationship(back_populates="company", cascade="all, delete-orphan")

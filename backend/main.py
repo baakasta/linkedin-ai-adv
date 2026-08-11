@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from backend.db.db import engine,get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Annotated
-from backend.routers import accounts, users , companies, executives, ai
+from backend.routers import accounts, users , companies, executives, ai, reports
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -19,6 +19,7 @@ app.include_router(companies.router, prefix="/api/companies", tags=["companies"]
 app.include_router(executives.router, prefix="/api/executives", tags=["executives"])
 app.include_router(accounts.router, prefix="/api/accounts", tags=["accounts"])
 app.include_router(ai.router, prefix="/api", tags=["ai"])
+app.include_router(reports.router, prefix="/api", tags=["reports"])
 
 
 @app.get("/health", include_in_schema=False)
