@@ -1,7 +1,10 @@
 package com.lms3.linkedinadvisor.optimisation.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.lms3.linkedinadvisor.optimisation.dto.input.DemandeOptimisation;
 import com.lms3.linkedinadvisor.optimisation.dto.output.ResultatOptimisation;
 import com.lms3.linkedinadvisor.optimisation.dto.output.VarianteOptimisee;
@@ -40,6 +43,9 @@ public class OptimisationService {
     // Mapper tolerant : accepte les sauts de ligne bruts dans les chaines JSON.
     private final ObjectMapper mapperTolerant;
 
+    // Nombre maximal d'appels LLM pour une meme demande (le JSON peut etre malforme).
+    private static final int MAX_TENTATIVES = 2;
+
     // Detecte tout marqueur entre crochets, ex. [chiffre a completer], [nom du client]
     private static final Pattern MOTIF_MARQUEUR = Pattern.compile("\\[[^\\]]+\\]");
 
@@ -61,23 +67,94 @@ public class OptimisationService {
         try {
             String demandeJson = objectMapper.writeValueAsString(demande);
 
-            // Generation par le LLM : texte brut + parsing tolerant.
-            String reponseBrute = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(demandeJson)
-                    .call()
-                    .content();
+            JsonProcessingException derniereErreur = null;
 
-            String jsonNettoye = nettoyer(reponseBrute);
+            // Le LLM peut produire un JSON malforme : on relance la demande un
+            // nombre limite de fois avant d'abandonner.
+            for (int tentative = 1; tentative <= MAX_TENTATIVES; tentative++) {
+                String reponseBrute = chatClient.prompt()
+                        .system(systemPrompt)
+                        .user(demandeJson)
+                        .call()
+                        .content();
 
-            ResultatOptimisation resultat =
-                    mapperTolerant.readValue(jsonNettoye, ResultatOptimisation.class);
+                String jsonNettoye = nettoyer(reponseBrute);
 
-            // Reconstruire la liste des marqueurs depuis le texte reel.
-            return corrigerMarqueurs(resultat);
+                ResultatOptimisation resultat = parseResultat(jsonNettoye);
+                if (resultat != null) {
+                    // Reconstruire la liste des marqueurs depuis le texte reel.
+                    return corrigerMarqueurs(resultat);
+                }
+
+                try {
+                    mapperTolerant.readTree(jsonNettoye);
+                } catch (JsonProcessingException ex) {
+                    derniereErreur = ex;
+                }
+            }
+
+            throw new OptimisationException(
+                    "Echec de l'optimisation IA : JSON LLM invalide apres "
+                            + MAX_TENTATIVES + " tentatives",
+                    derniereErreur);
 
         } catch (Exception ex) {
             throw new OptimisationException("Echec de l'optimisation IA", ex);
+        }
+    }
+
+    /**
+     * Parse le JSON du LLM de facon robuste :
+     *   1. essai direct ;
+     *   2. si echec, normalisation : un champ attendu en String qui arrive en
+     *      objet ({...}) est converti en texte.
+     * Retourne null si aucune forme n'est exploitable.
+     */
+    private ResultatOptimisation parseResultat(String jsonNettoye) {
+        try {
+            return mapperTolerant.readValue(jsonNettoye, ResultatOptimisation.class);
+        } catch (JsonProcessingException ex) {
+            return parseResultatNormalise(jsonNettoye);
+        }
+    }
+
+    /**
+     * Normalise les formes les plus courantes de JSON LLM malforme : un objet
+     * dans un champ attendu en String (ex. "contenu": {"texte": "..."}) est
+     * converti en texte avant re-deserialisation.
+     */
+    private ResultatOptimisation parseResultatNormalise(String jsonNettoye) {
+        try {
+            JsonNode racine = mapperTolerant.readTree(jsonNettoye);
+            if (racine == null || !racine.isObject()) {
+                return null;
+            }
+            JsonNode variantes = racine.path("variantes");
+            if (variantes.isArray()) {
+                for (JsonNode variante : variantes) {
+                    normaliserChampTexte(variante, "contenu");
+                    normaliserChampTexte(variante, "angle");
+                    normaliserChampTexte(variante, "explication");
+                }
+            }
+            return mapperTolerant.convertValue(racine, ResultatOptimisation.class);
+        } catch (JsonProcessingException | IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    /**
+     * Si la valeur du champ attendu en String est un objet, prend la valeur de
+     * "texte" si presente, sinon serialise l'objet en JSON.
+     */
+    private void normaliserChampTexte(JsonNode noeud, String champ) {
+        if (!(noeud instanceof ObjectNode objectNode)) {
+            return;
+        }
+        JsonNode valeur = objectNode.get(champ);
+        if (valeur != null && valeur.isObject()) {
+            String texte = valeur.path("texte").asText(null);
+            objectNode.put(champ, texte != null ? texte : valeur.toString());
         }
     }
 
