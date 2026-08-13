@@ -23,4 +23,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:8000"
     ai_service_url: str = "http://localhost:8080"
 
+    scheduler_interval_hours: int = 24
+    generation_lookahead_days: int = 7
+
 settings = Settings() 
