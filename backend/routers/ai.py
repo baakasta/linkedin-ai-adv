@@ -360,6 +360,24 @@ async def create_generation(
     return generation
 
 
+@router.get("/generations/{generation_id}", response_model=GenerationResponse)
+async def get_generation(
+    generation_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    generation = (await db.execute(
+        select(Generation)
+        .options(selectinload(Generation.company))
+        .where(Generation.id == generation_id)
+    )).scalars().first()
+    if not generation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Generation not found")
+    if generation.company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your generation")
+    return generation
+
+
 @router.get("/generations/company/{company_id}", response_model=list[GenerationResponse])
 async def get_company_generations(
     company_id: uuid.UUID,
