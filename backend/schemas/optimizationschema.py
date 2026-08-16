@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
+from backend.schemas.recommendationschema import RecommendationResponse
 
 
 class OptimizationCreate(BaseModel):
@@ -50,3 +51,7 @@ class OptimizationResponse(BaseModel):
     contenu_final: str | None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class RecommendationOptimizations(RecommendationResponse):
+    optimizations: list[OptimizationResponse]

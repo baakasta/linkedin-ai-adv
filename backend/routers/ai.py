@@ -25,6 +25,7 @@ from backend.schemas.optimizationschema import (
     OptimizationVerdict,
     OptimizationDecisionRequest,
     OptimizationVerdictResult,
+    RecommendationOptimizations,
 )
 from backend.schemas.generationschema import GenerationCreate, GenerationResponse
 from backend.schemas.benchmarkschema import BenchmarkCreate, BenchmarkResponse
@@ -220,6 +221,34 @@ async def get_audit_recommendations(
         select(Recommendation).where(Recommendation.audit_id == audit_id)
     )
     return result.scalars().all()
+
+
+@router.get(
+    "/audits/{audit_id}/optimizations",
+    response_model=list[RecommendationOptimizations],
+)
+async def get_audit_optimizations(
+    audit_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    audit = (await db.execute(
+        select(Audit)
+        .options(
+            selectinload(Audit.recommendations)
+            .selectinload(Recommendation.optimizations),
+            selectinload(Audit.company),
+        )
+        .where(Audit.id == audit_id)
+    )).scalars().first()
+    if not audit:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit not found")
+    if audit.company.account_id != current_user.account_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your audit")
+
+    for rec in audit.recommendations:
+        rec.optimizations.sort(key=lambda o: o.created_at)
+    return audit.recommendations
 
 
 # --- Optimization ---
