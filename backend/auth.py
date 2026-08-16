@@ -17,6 +17,7 @@ import secrets
 password_hash = PasswordHash.recommended()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/users/token")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="api/users/token", auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -98,6 +99,18 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+async def get_current_user_optional(
+    token: Annotated[str | None, Depends(oauth2_scheme_optional)] = None,
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    if not token:
+        return None
+    try:
+        return await get_current_user(token, db)
+    except HTTPException:
+        return None
+
 
 def require_role(*roles: UserRole):
     async def checker(current_user: Annotated[User, Depends(get_current_user)]) -> User:
