@@ -365,6 +365,57 @@ async def decide_optimizations(
     reject -> marque simplement la recommandation comme rejetee."""
     results: list[OptimizationVerdictResult] = []
 
+    # --- validation de couverture du lot ---
+    ids = [v.optimization_id for v in payload.verdicts]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Un verdict par optimisation uniquement : ids dupliques interdits",
+        )
+
+    optimizations = (await db.execute(
+        select(Optimization)
+        .options(
+            selectinload(Optimization.recommendation)
+            .selectinload(Recommendation.audit)
+            .selectinload(Audit.company)
+        )
+        .where(Optimization.id.in_(ids))
+    )).scalars().all()
+    by_id = {o.id: o for o in optimizations}
+
+    owned = [
+        o for o in optimizations
+        if o.recommendation.audit.company.account_id == current_user.account_id
+    ]
+    audits = {o.recommendation.audit_id for o in owned}
+    if len(audits) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Tous les verdicts doivent viser des optimisations du meme audit",
+        )
+    if audits:
+        audit = (await db.execute(
+            select(Audit)
+            .options(
+                selectinload(Audit.recommendations)
+                .selectinload(Recommendation.optimizations)
+            )
+            .where(Audit.id == next(iter(audits)))
+        )).scalars().first()
+        required_ids = {
+            o.id for rec in audit.recommendations for o in rec.optimizations
+        }
+        missing = required_ids - {o.id for o in owned}
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Un verdict est requis pour chaque optimisation de l'audit. "
+                    f"Il manque : {[str(m) for m in sorted(missing)]}"
+                ),
+            )
+
     for verdict in payload.verdicts:
         if verdict.decision == OptimizationDecision.MODIFY and not (verdict.prompt or "").strip():
             results.append(OptimizationVerdictResult(
@@ -375,15 +426,7 @@ async def decide_optimizations(
             ))
             continue
 
-        optimization = (await db.execute(
-            select(Optimization)
-            .options(
-                selectinload(Optimization.recommendation)
-                .selectinload(Recommendation.audit)
-                .selectinload(Audit.company)
-            )
-            .where(Optimization.id == verdict.optimization_id)
-        )).scalars().first()
+        optimization = by_id.get(verdict.optimization_id)
         if not optimization or (
             optimization.recommendation.audit.company.account_id != current_user.account_id
         ):
