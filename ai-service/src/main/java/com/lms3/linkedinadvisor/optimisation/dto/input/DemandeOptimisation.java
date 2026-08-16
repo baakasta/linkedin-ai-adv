@@ -6,5 +6,6 @@ public record DemandeOptimisation(
         // resume_dirigeant, titre_dirigeant
         String contenuActuel,        // le texte existant a ameliorer (vide si creation)
         ResultatAuditInput resultatAudit,
-        ContexteEntreprise contexteEntreprise
+        ContexteEntreprise contexteEntreprise,
+        String consigneUtilisateur   // instruction libre de l'utilisateur (optionnelle)
 ) {}

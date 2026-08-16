@@ -18,7 +18,14 @@ from backend.auth import get_current_user
 from backend.config import settings
 from backend.schemas.auditschema import AuditCreate, AuditResponse, AuditListResponse
 from backend.schemas.recommendationschema import RecommendationResponse
-from backend.schemas.optimizationschema import OptimizationCreate, OptimizationResponse
+from backend.schemas.optimizationschema import (
+    OptimizationCreate,
+    OptimizationResponse,
+    OptimizationDecision,
+    OptimizationVerdict,
+    OptimizationDecisionRequest,
+    OptimizationVerdictResult,
+)
 from backend.schemas.generationschema import GenerationCreate, GenerationResponse
 from backend.schemas.benchmarkschema import BenchmarkCreate, BenchmarkResponse
 from backend.services.benchmark import build_benchmark
@@ -269,6 +276,7 @@ async def create_optimization(
         recommendation_id=payload.recommendation_id,
         type_element=payload.type_element,
         contenu_original=payload.contenu_original,
+        contexte_entreprise=payload.contexte_entreprise,
         variantes={"variantes": ai_result.get("variantes", [])},
         variante_recommandee=ai_result.get("variante_recommandee", {}),
         marqueurs=ai_result.get("marqueurs", []),
@@ -301,6 +309,164 @@ async def get_optimization(
     if optimization.recommendation.audit.company.account_id != current_user.account_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your optimization")
     return optimization
+
+
+def _recommended_content(optimization: Optimization) -> str:
+    """Contenu de la variante recommandee (fallback: premiere variante)."""
+    recommended = optimization.variante_recommandee or {}
+    angle = recommended.get("angle")
+    for v in (optimization.variantes or {}).get("variantes", []):
+        if v.get("angle") == angle and v.get("contenu"):
+            return v["contenu"]
+    variants = (optimization.variantes or {}).get("variantes", [])
+    if variants and variants[0].get("contenu"):
+        return variants[0]["contenu"]
+    return optimization.contenu_original or ""
+
+
+def _final_content_from_result(ai_result: dict) -> str:
+    recommended = ai_result.get("variante_recommandee") or {}
+    angle = recommended.get("angle")
+    for v in ai_result.get("variantes", []):
+        if v.get("angle") == angle and v.get("contenu"):
+            return v["contenu"]
+    variants = ai_result.get("variantes", [])
+    if variants and variants[0].get("contenu"):
+        return variants[0]["contenu"]
+    return ""
+
+
+async def _call_ai_optimisation(ai_payload: dict) -> dict:
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.ai_service_url}/api/optimisations",
+                json=ai_payload,
+                timeout=60.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI service error: {str(exc)}",
+            )
+    return response.json()
+
+
+@router.patch("/optimizations/decisions", response_model=list[OptimizationVerdictResult])
+async def decide_optimizations(
+    payload: OptimizationDecisionRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Traite en lot les decisions de l'utilisateur sur ses optimisations:
+    accept -> finalise la variante recommandee via le module IA,
+    modify -> l'IA interprete la consigne fournie par l'utilisateur,
+    reject -> marque simplement la recommandation comme rejetee."""
+    results: list[OptimizationVerdictResult] = []
+
+    for verdict in payload.verdicts:
+        if verdict.decision == OptimizationDecision.MODIFY and not (verdict.prompt or "").strip():
+            results.append(OptimizationVerdictResult(
+                optimization_id=verdict.optimization_id,
+                decision=verdict.decision,
+                status="error",
+                message="Le champ prompt est requis pour la decision modify",
+            ))
+            continue
+
+        optimization = (await db.execute(
+            select(Optimization)
+            .options(
+                selectinload(Optimization.recommendation)
+                .selectinload(Recommendation.audit)
+                .selectinload(Audit.company)
+            )
+            .where(Optimization.id == verdict.optimization_id)
+        )).scalars().first()
+        if not optimization or (
+            optimization.recommendation.audit.company.account_id != current_user.account_id
+        ):
+            results.append(OptimizationVerdictResult(
+                optimization_id=verdict.optimization_id,
+                decision=verdict.decision,
+                status="error",
+                message="Optimization not found or not yours",
+            ))
+            continue
+
+        if verdict.decision == OptimizationDecision.REJECT:
+            optimization.decision = OptimizationDecision.REJECT.value
+            optimization.contenu_final = None
+            results.append(OptimizationVerdictResult(
+                optimization_id=verdict.optimization_id,
+                decision=verdict.decision,
+                status="success",
+                message=f"Recommandation {optimization.id} rejetee",
+            ))
+            continue
+
+        rec = optimization.recommendation
+        base_content = _recommended_content(optimization)
+        niveau = _niveau_for_critere(rec.audit.analyse_ia, rec.critere_code)
+
+        if verdict.decision == OptimizationDecision.ACCEPT:
+            consigne = (
+                "L'utilisateur a accepte la variante recommandee fournie dans "
+                "contenu_actuel. Finalise-la : corrige les eventuelles fautes "
+                "et ameliore la fluidite sans changer le sens ni le fond."
+            )
+        else:
+            consigne = verdict.prompt
+
+        ai_payload = {
+            "type_element": optimization.type_element,
+            "contenu_actuel": base_content,
+            "resultat_audit": {
+                "critere_code": rec.critere_code,
+                "niveau": niveau,
+                "justification_audit": rec.raison,
+                "recommandation_id": str(rec.id),
+            },
+            "contexte_entreprise": optimization.contexte_entreprise or {},
+            "consigne_utilisateur": consigne,
+        }
+
+        try:
+            ai_result = await _call_ai_optimisation(ai_payload)
+        except HTTPException as exc:
+            results.append(OptimizationVerdictResult(
+                optimization_id=verdict.optimization_id,
+                decision=verdict.decision,
+                status="error",
+                message=exc.detail,
+            ))
+            continue
+
+        contenu_final = _final_content_from_result(ai_result)
+        optimization.decision = verdict.decision.value
+        optimization.contenu_final = contenu_final or None
+        optimization.variantes = {"variantes": ai_result.get("variantes", [])}
+        optimization.variante_recommandee = ai_result.get("variante_recommandee", {})
+        optimization.marqueurs = ai_result.get("marqueurs", [])
+        optimization.faiblesses_corrigees = ai_result.get("faiblesses_corrigees", [])
+        optimization.ameliorations_apportees = ai_result.get("ameliorations_apportees", [])
+
+        message = (
+            f"Recommandation {optimization.id} finalisee"
+            if verdict.decision == OptimizationDecision.ACCEPT
+            else f"Recommandation {optimization.id} modifiee selon votre consigne"
+        )
+        results.append(OptimizationVerdictResult(
+            optimization_id=verdict.optimization_id,
+            decision=verdict.decision,
+            status="success",
+            message=message,
+            result=ai_result,
+        ))
+
+    await db.commit()
+    return results
 
 
 # --- Generation ---

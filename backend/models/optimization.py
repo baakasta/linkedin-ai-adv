@@ -17,6 +17,7 @@ class Optimization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     type_element: Mapped[str] = mapped_column(String(100), nullable=False)
     contenu_original: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contexte_entreprise: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # full AI output — 3 variants + recommended
     variantes: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -26,3 +27,8 @@ class Optimization(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     recommendation: Mapped["Recommendation"] = relationship(back_populates="optimizations")
     faiblesses_corrigees: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     ameliorations_apportees: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    # decision made by the user on this optimization: accept | modify | reject
+    decision: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # final text chosen by the user (filled on accept / modify)
+    contenu_final: Mapped[str | None] = mapped_column(Text, nullable=True)

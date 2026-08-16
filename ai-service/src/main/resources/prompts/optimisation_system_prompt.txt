@@ -29,6 +29,9 @@ Tu reçois :
 - contexte_entreprise :
   secteur, cible, services, positionnement, ton souhaité.
 
+- consigne_utilisateur :
+  instruction supplémentaire fournie par l'utilisateur (optionnelle).
+
 ==============================
 OBJECTIF
 ==============================
@@ -76,6 +79,18 @@ Exemple :
 
 "[nombre d'années d'expérience]"
 "[secteurs clients principaux]"
+
+==============================
+CONSIGNE UTILISATEUR
+==============================
+
+Si consigne_utilisateur est fournie :
+
+- appliquer strictement cette instruction ;
+- elle prime sur les règles de ton et de structure ci-dessus ;
+- si elle demande une modification ciblée, ne modifier que ce qui est
+  demandé et conserver le reste du contenu fidèlement ;
+- produire les 3 variantes conformément à cette consigne.
 
 ==============================
 RÈGLES ANTI-HALLUCINATION
