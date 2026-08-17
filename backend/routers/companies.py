@@ -8,16 +8,9 @@ from backend.models.company import Company
 from backend.models.user import User, UserRole
 from backend.db.db import get_db
 from backend.schemas.companyschema import CompanyCreate, CompanyResponse, CompanyUpdate
-from backend.auth import get_current_user ,require_role
+from backend.auth import get_current_user
 
 router = APIRouter()
-
-@router.get("", response_model=list[CompanyResponse])
-async def get_all_companies(db: Annotated[AsyncSession, Depends(get_db)],
-                            _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
-):
-    result = await db.execute(select(Company))
-    return result.scalars().all()
 
 @router.get("/me", response_model=list[CompanyResponse])
 async def get_my_companies(

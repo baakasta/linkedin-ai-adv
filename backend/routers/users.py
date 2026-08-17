@@ -5,7 +5,6 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status,BackgroundTasks
 from sqlalchemy import func,select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from backend.models.user import User,Account,UserRole,PasswordResetToken
 from backend.db.db import get_db
 from backend.schemas.userschema import (
@@ -16,8 +15,7 @@ from backend.schemas.userschema import (
     UserPublic,
     ChangePasswordRequest,
     ForgotPasswordRequest,
-    ResetPasswordRequest,
-    AdminUserUpdate,)
+    ResetPasswordRequest,)
 from backend.models.subscription import Subscription, PlanTier, SubscriptionStatus
 from backend.auth import (
     create_access_token,
@@ -26,7 +24,6 @@ from backend.auth import (
     verify_access_token,
     verify_password,
     get_current_user,
-    require_role,
     generate_reset_token,
     hash_reset_token,
 )
@@ -34,14 +31,6 @@ from email_utils import send_password_reset_email
 from backend.config import settings
 from sqlalchemy import delete as sql_delete
 router = APIRouter()
-
-@router.get("", response_model=list[UserPublic])
-async def get_all_users(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
-):
-    result = await db.execute(select(User).options(selectinload(User.account)))
-    return result.scalars().all()
 
 @router.post(
     "/create",
@@ -327,23 +316,3 @@ async def change_password(
 
     await db.commit()
     return {"message": "Password changed successfully"}
-
-@router.patch("/{user_id}/admin", response_model=UserPrivate)
-async def admin_update_user(
-    user_id: uuid.UUID,
-    user_update: AdminUserUpdate,
-    current_user: Annotated[User, Depends(require_role(UserRole.ADMIN))],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalars().first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    update_data = user_update.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(user, field, value)
-
-    await db.commit()
-    await db.refresh(user)
-    return user

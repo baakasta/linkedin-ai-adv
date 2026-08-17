@@ -9,16 +9,9 @@ from backend.models.executive import Executive
 from backend.models.company import Company
 from backend.models.user import User, UserRole
 from backend.schemas.executiveschema import ExecutiveCreate, ExecutiveResponse, ExecutiveUpdate
-from backend.auth import get_current_user, require_role
+from backend.auth import get_current_user
 
 router = APIRouter()
-
-@router.get("", response_model=list[ExecutiveResponse],)
-async def get_all_executives(db: Annotated[AsyncSession, Depends(get_db)],
-                            _: Annotated[User, Depends(require_role(UserRole.ADMIN))],
-):
-    result = await db.execute(select(Executive).options(selectinload(Executive.company)))
-    return result.scalars().all()
 
 @router.get("/{executive_id}", response_model=ExecutiveResponse)
 async def get_executive(
