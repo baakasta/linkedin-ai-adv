@@ -7,6 +7,7 @@ from backend.models.generation import Generation
 from backend.models.audit import Audit
 from backend.models.benchmark import Benchmark
 from backend.models.calendar import Calendar
+from backend.models.watch import Watch
 
 
 class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -28,3 +29,4 @@ class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     generations: Mapped[list["Generation"]] = relationship(back_populates="company", cascade="all, delete-orphan")
     benchmarks: Mapped[list["Benchmark"]] = relationship(back_populates="company", cascade="all, delete-orphan")
     calendar: Mapped["Calendar | None"] = relationship(back_populates="company", cascade="all, delete-orphan")
+    watches: Mapped[list["Watch"]] = relationship(back_populates="company", cascade="all, delete-orphan")
