@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status,BackgroundTasks
 from sqlalchemy import func,select
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.user import User,Account,UserRole,PasswordResetToken
+from backend.models.refresh_token import RefreshToken
 from backend.db.db import get_db
 from backend.schemas.userschema import (
     UserCreate,
@@ -15,10 +16,13 @@ from backend.schemas.userschema import (
     UserPublic,
     ChangePasswordRequest,
     ForgotPasswordRequest,
-    ResetPasswordRequest,)
+    ResetPasswordRequest,
+    RefreshRequest,)
 from backend.models.subscription import Subscription, PlanTier, SubscriptionStatus
 from backend.auth import (
     create_access_token,
+    create_refresh_token,
+    hash_refresh_token,
     hash_password,
     oauth2_scheme,
     verify_access_token,
@@ -108,7 +112,95 @@ async def login_for_access_token(
         data={"sub": str(user.id)},
         expires_delta=access_token_expires,
     )
-    return Token(access_token=access_token, token_type="bearer")
+
+    # Create refresh token
+    raw_refresh = create_refresh_token()
+    refresh_token_hash = hash_refresh_token(raw_refresh)
+    refresh_expires_at = datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days)
+
+    db.add(RefreshToken(
+        user_id=user.id,
+        token_hash=refresh_token_hash,
+        expires_at=refresh_expires_at,
+    ))
+    await db.commit()
+
+    return Token(access_token=access_token, refresh_token=raw_refresh, token_type="bearer")
+
+
+@router.post("/token/refresh", response_model=Token)
+async def refresh_access_token(
+    request_data: RefreshRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    token_hash = hash_refresh_token(request_data.refresh_token)
+
+    result = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked_at.is_(None),
+        )
+    )
+    stored = result.scalars().first()
+
+    if not stored:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+
+    if stored.expires_at < datetime.now(UTC):
+        await db.delete(stored)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Refresh token expired",
+        )
+
+    user_result = await db.execute(select(User).where(User.id == stored.user_id))
+    user = user_result.scalars().first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or deactivated",
+        )
+
+    # Rotate: revoke old, issue new pair
+    stored.revoked_at = datetime.now(UTC)
+
+    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+    new_access_token = create_access_token(
+        data={"sub": str(user.id)},
+        expires_delta=access_token_expires,
+    )
+
+    raw_refresh = create_refresh_token()
+    refresh_token_hash = hash_refresh_token(raw_refresh)
+    refresh_expires_at = datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days)
+
+    db.add(RefreshToken(
+        user_id=user.id,
+        token_hash=refresh_token_hash,
+        expires_at=refresh_expires_at,
+    ))
+    await db.commit()
+
+    return Token(access_token=new_access_token, refresh_token=raw_refresh, token_type="bearer")
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    request_data: RefreshRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    token_hash = hash_refresh_token(request_data.refresh_token)
+    result = await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    )
+    stored = result.scalars().first()
+    if stored:
+        stored.revoked_at = datetime.now(UTC)
+        await db.commit()
 
 
 @router.get("/me", response_model=UserPrivate)
@@ -287,6 +379,11 @@ async def reset_password(
             PasswordResetToken.user_id == user.id,
         ),
     )
+    await db.execute(
+        sql_delete(RefreshToken).where(
+            RefreshToken.user_id == user.id,
+        ),
+    )
 
     await db.commit()
     return {
@@ -311,6 +408,11 @@ async def change_password(
     await db.execute(
         sql_delete(PasswordResetToken).where(
             PasswordResetToken.user_id == current_user.id,
+        ),
+    )
+    await db.execute(
+        sql_delete(RefreshToken).where(
+            RefreshToken.user_id == current_user.id,
         ),
     )
 
