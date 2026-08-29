@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.auth import get_current_user
+from backend.dependencies import require_plan
+from backend.models.subscription import PlanTier
 from backend.config import settings
 from backend.db.db import AsyncSessionLocal, get_db
 from backend.models.audit import Audit
@@ -25,6 +26,8 @@ from backend.schemas.calendarschema import (
 )
 
 router = APIRouter()
+
+DEP_PRO = require_plan(PlanTier.PRO)
 
 HORIZON_JOURS = 90
 
@@ -195,7 +198,7 @@ async def _generer_contenu_slots(slots: list[CalendarSlot]) -> tuple[int, int]:
 @router.post("", response_model=CalendarResponse, status_code=status.HTTP_201_CREATED)
 async def create_calendar(
     payload: CalendarCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     await _verifier_company(db, payload.company_id, current_user)
@@ -228,7 +231,7 @@ async def create_calendar(
 @router.get("/company/{company_id}", response_model=CalendarResponse)
 async def get_company_calendar(
     company_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     await _verifier_company(db, company_id, current_user)
@@ -242,7 +245,7 @@ async def get_company_calendar(
 async def update_calendar_frequence(
     company_id: uuid.UUID,
     payload: CalendarUpdate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     await _verifier_company(db, company_id, current_user)
@@ -290,7 +293,7 @@ async def update_calendar_frequence(
 @router.post("/slots/{slot_id}/generate", response_model=CalendarSlotResponse)
 async def generate_slot_content(
     slot_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     slot = (await db.execute(
@@ -312,7 +315,7 @@ async def generate_slot_content(
 @router.delete("/slots/{slot_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_slot(
     slot_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     slot = (await db.execute(

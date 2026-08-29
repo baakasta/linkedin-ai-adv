@@ -15,6 +15,8 @@ from backend.models.optimization import Optimization
 from backend.models.generation import Generation
 from backend.models.benchmark import Benchmark
 from backend.auth import get_current_user
+from backend.dependencies import require_plan
+from backend.models.subscription import PlanTier
 from backend.config import settings
 from backend.schemas.auditschema import AuditCreate, AuditResponse, AuditListResponse
 from backend.schemas.recommendationschema import RecommendationResponse
@@ -30,8 +32,11 @@ from backend.schemas.optimizationschema import (
 from backend.schemas.generationschema import GenerationCreate, GenerationResponse
 from backend.schemas.benchmarkschema import BenchmarkCreate, BenchmarkResponse
 from backend.services.benchmark import build_benchmark
+from backend.services.quotas import enforce_ai_quota
 
 router = APIRouter()
+
+DEP_PRO = require_plan(PlanTier.PRO)
 
 _PRIORITY_MAP = {
     "CRITIQUE": RecommendationPriority.CRITIQUE,
@@ -83,6 +88,8 @@ async def create_audit(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     if company.account_id != current_user.account_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
+
+    await enforce_ai_quota(db, current_user, "audits")
 
     # call AI module
     async with httpx.AsyncClient() as client:
@@ -269,6 +276,8 @@ async def create_optimization(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
     if recommendation.audit.company.account_id != current_user.account_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your recommendation")
+
+    await enforce_ai_quota(db, current_user, "optimizations")
 
     # build AI request
     niveau = _niveau_for_critere(recommendation.audit.analyse_ia, recommendation.critere_code)
@@ -557,6 +566,8 @@ async def create_generation(
     if company.account_id != current_user.account_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your company")
 
+    await enforce_ai_quota(db, current_user, "generations")
+
     # build AI request
     ai_payload = {
         "type_contenu": payload.type_contenu,
@@ -643,7 +654,7 @@ async def get_company_generations(
 @router.post("/benchmarks", response_model=BenchmarkResponse, status_code=status.HTTP_201_CREATED)
 async def create_benchmark(
     payload: BenchmarkCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     company = (await db.execute(
@@ -715,7 +726,7 @@ async def create_benchmark(
 @router.get("/benchmarks/{benchmark_id}", response_model=BenchmarkResponse)
 async def get_benchmark(
     benchmark_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     benchmark = (await db.execute(
@@ -733,7 +744,7 @@ async def get_benchmark(
 @router.get("/benchmarks/company/{company_id}", response_model=list[BenchmarkResponse])
 async def get_company_benchmarks(
     company_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     company = (await db.execute(

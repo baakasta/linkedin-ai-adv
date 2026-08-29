@@ -5,7 +5,7 @@ import asyncio
 from backend.db.db import engine,get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Annotated
-from backend.routers import accounts, users , companies, executives, ai, reports, calendar, dashboard, veille, admin
+from backend.routers import accounts, users , companies, executives, ai, reports, calendar, dashboard, veille, admin, strategy, assistant
 from backend.scheduler import generation_loop
 
 @asynccontextmanager
@@ -32,6 +32,8 @@ app.include_router(calendar.router, prefix="/api/calendars", tags=["calendars"])
 app.include_router(dashboard.router, prefix="/api", tags=["dashboard"])
 app.include_router(veille.router, prefix="/api", tags=["veille"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(strategy.router, prefix="/api", tags=["stratégie"])
+app.include_router(assistant.router, prefix="/api", tags=["assistant"])
 
 
 @app.get("/health", include_in_schema=False)

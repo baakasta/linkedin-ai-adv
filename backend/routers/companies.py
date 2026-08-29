@@ -1,7 +1,7 @@
 from typing import Annotated
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from backend.models.company import Company
@@ -9,6 +9,7 @@ from backend.models.user import User, UserRole
 from backend.db.db import get_db
 from backend.schemas.companyschema import CompanyCreate, CompanyResponse, CompanyUpdate
 from backend.auth import get_current_user
+from backend.dependencies import account_company_limit
 
 router = APIRouter()
 
@@ -56,6 +57,19 @@ async def create_company(
     )).scalars().first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company name already exists")
+
+    company_limit = await account_company_limit(db, current_user)
+    if company_limit is not None:
+        existing_count = (await db.execute(
+            select(func.count())
+            .select_from(Company)
+            .where(Company.account_id == current_user.account_id)
+        )).scalar_one()
+        if existing_count >= company_limit:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your current plan allows only one company. Upgrade to the Business plan for multiple companies.",
+            )
 
     new_company = Company(
         account_id=current_user.account_id,  # from token

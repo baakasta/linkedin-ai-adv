@@ -8,6 +8,7 @@ from backend.models.audit import Audit
 from backend.models.benchmark import Benchmark
 from backend.models.calendar import Calendar
 from backend.models.watch import Watch
+from backend.models.strategy import Strategy
 
 
 class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -30,3 +31,5 @@ class Company(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     benchmarks: Mapped[list["Benchmark"]] = relationship(back_populates="company", cascade="all, delete-orphan")
     calendar: Mapped["Calendar | None"] = relationship(back_populates="company", cascade="all, delete-orphan")
     watches: Mapped[list["Watch"]] = relationship(back_populates="company", cascade="all, delete-orphan")
+    strategies: Mapped[list["Strategy"]] = relationship(back_populates="company", cascade="all, delete-orphan")
+    conversations: Mapped[list["Conversation"]] = relationship(back_populates="company", cascade="all, delete-orphan")

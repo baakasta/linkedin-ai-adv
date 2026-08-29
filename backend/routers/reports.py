@@ -23,7 +23,9 @@ from backend.schemas.reportshareschema import (
     ReportShareUrl,
     HistoryEntry,
 )
-from backend.auth import get_current_user, get_current_user_optional
+from backend.auth import get_current_user_optional
+from backend.dependencies import require_plan, check_plan_access
+from backend.models.subscription import PlanTier
 from backend.services.reports import (
     audit_report_pdf,
     benchmark_report_pdf,
@@ -31,6 +33,8 @@ from backend.services.reports import (
 )
 
 router = APIRouter()
+
+DEP_PRO = require_plan(PlanTier.PRO)
 
 SHARE_DEFAULT_DUREE_JOURS = 7
 
@@ -229,6 +233,9 @@ async def get_audit_report(
     if not audit:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit not found")
 
+    if not share and current_user is not None:
+        await check_plan_access(db, current_user, PlanTier.PRO)
+
     valide = False
     if share:
         valide = _autorise_par_share(await _verifier_share(db, share), audit.company_id)
@@ -260,6 +267,9 @@ async def get_benchmark_report(
     if not benchmark:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Benchmark not found")
 
+    if not share and current_user is not None:
+        await check_plan_access(db, current_user, PlanTier.PRO)
+
     valide = False
     if share:
         valide = _autorise_par_share(await _verifier_share(db, share), benchmark.company_id)
@@ -285,6 +295,9 @@ async def get_monthly_report(
     )).scalars().first()
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    if not share and current_user is not None:
+        await check_plan_access(db, current_user, PlanTier.PRO)
 
     valide = False
     if share:
@@ -315,7 +328,7 @@ async def get_monthly_report(
 @router.get("/reports/history", response_model=ReportHistory)
 async def get_report_history(
     company_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     company = (await db.execute(
@@ -335,7 +348,7 @@ async def get_report_history(
 @router.post("/reports/share", response_model=ReportShareUrl, status_code=status.HTTP_201_CREATED)
 async def create_report_share(
     payload: ReportShareCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     company = (await db.execute(
@@ -399,7 +412,7 @@ async def get_shared_report(
 @router.delete("/reports/share/{token}", response_model=ReportShareResponse)
 async def revoke_report_share(
     token: str,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_PRO)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     share = (await db.execute(

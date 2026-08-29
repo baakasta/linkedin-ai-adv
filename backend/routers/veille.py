@@ -13,7 +13,8 @@ from backend.models.watch import Watch
 from backend.models.watch_snapshot import WatchSnapshot
 from backend.models.watch_alert import WatchAlert
 from backend.models.audit import Audit
-from backend.auth import get_current_user
+from backend.dependencies import require_plan
+from backend.models.subscription import PlanTier
 from backend.schemas.watchschema import (
     WatchCreate,
     WatchUpdate,
@@ -26,13 +27,15 @@ from backend.services.veille import create_snapshot_from_audit, build_veille_ove
 
 router = APIRouter()
 
+DEP_BUSINESS = require_plan(PlanTier.BUSINESS)
+
 
 # --- Watch CRUD ---
 
 @router.post("/watches", response_model=WatchResponse, status_code=status.HTTP_201_CREATED)
 async def create_watch(
     payload: WatchCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     company = (await db.execute(
@@ -58,7 +61,7 @@ async def create_watch(
 @router.get("/watches/{watch_id}", response_model=WatchResponse)
 async def get_watch(
     watch_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     watch = (await db.execute(
@@ -92,7 +95,7 @@ async def get_watch(
 async def update_watch(
     watch_id: uuid.UUID,
     payload: WatchUpdate,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     watch = (await db.execute(
@@ -130,7 +133,7 @@ async def update_watch(
 @router.delete("/watches/{watch_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_watch(
     watch_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     watch = (await db.execute(
@@ -157,7 +160,7 @@ async def delete_watch(
 async def create_snapshot(
     watch_id: uuid.UUID,
     audit_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Create a snapshot from an existing audit (audit-based monitoring)."""
@@ -189,7 +192,7 @@ async def create_snapshot(
 @router.get("/watches/{watch_id}/snapshots", response_model=list[WatchSnapshotResponse])
 async def list_snapshots(
     watch_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     watch = (await db.execute(
@@ -213,7 +216,7 @@ async def list_snapshots(
 @router.get("/watches/{watch_id}/alerts", response_model=list[WatchAlertResponse])
 async def list_alerts(
     watch_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     watch = (await db.execute(
@@ -236,7 +239,7 @@ async def list_alerts(
 async def mark_alert_read(
     watch_id: uuid.UUID,
     alert_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     watch = (await db.execute(
@@ -264,7 +267,7 @@ async def mark_alert_read(
 @router.get("/watches/{watch_id}/overview", response_model=VeilleOverview)
 async def get_veille_overview(
     watch_id: uuid.UUID,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(DEP_BUSINESS)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     watch = (await db.execute(
