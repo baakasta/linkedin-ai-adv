@@ -4,6 +4,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status,BackgroundTasks
 from sqlalchemy import func,select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.user import User,Account,UserRole,PasswordResetToken
 from backend.models.refresh_token import RefreshToken
